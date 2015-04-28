@@ -1,3 +1,8 @@
+# Fork from Surus
+Thanks to Netflix for this UDF
+This fork intends to update jpmml evaluator to 1.1.18
+Tested on real cluster
+
 # Surus
 
 A collection of tools for analysis in Pig and Hive.
