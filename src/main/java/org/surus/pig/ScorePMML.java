@@ -1,7 +1,10 @@
 package org.surus.pig;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -10,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 import javax.xml.bind.JAXBException;
+import javax.xml.transform.Source;
+import javax.xml.transform.sax.SAXSource;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -24,7 +29,8 @@ import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
 import org.apache.pig.impl.util.UDFContext;
 import org.dmg.pmml.DataField;
 import org.dmg.pmml.FieldName;
-import org.dmg.pmml.IOUtil;
+import org.jpmml.model.ImportFilter;
+import org.jpmml.model.JAXBUtil;
 import org.dmg.pmml.OutputField;
 import org.dmg.pmml.PMML;
 import org.jpmml.evaluator.Evaluator;
@@ -33,7 +39,10 @@ import org.jpmml.evaluator.FieldValue;
 import org.jpmml.evaluator.ModelEvaluatorFactory;
 import org.jpmml.manager.ModelManager;
 import org.jpmml.manager.PMMLManager;
+import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.XMLReaderFactory;
 
 public class ScorePMML extends EvalFunc<Tuple> {
 
@@ -127,7 +136,10 @@ public class ScorePMML extends EvalFunc<Tuple> {
 			 */
 			
 			// Try reading file from distributed cache.
-    		pmml = IOUtil.unmarshal(new File("./"+this.modelName));
+			
+			Source source = createImportSource(new FileInputStream(new File("./"+this.modelName)));
+					
+    		pmml = JAXBUtil.unmarshalPMML(source);
     		System.err.println("Read model from distributed cache!");
     		
 		} catch (Throwable t) {
@@ -138,12 +150,18 @@ public class ScorePMML extends EvalFunc<Tuple> {
 				Path path = new Path(this.modelPath);
 				FileSystem fs = path.getFileSystem(new Configuration());
 				FSDataInputStream in = fs.open(path);
-				pmml = IOUtil.unmarshal(in);
+				
+				Source source = createImportSource(in);
+				
+				pmml = JAXBUtil.unmarshalPMML(source);
 	    		System.err.println("Read model from s3!");
 
 			} else {
 				// ... read from local file.
-				pmml = IOUtil.unmarshal(new File(this.modelPath));
+				
+				Source source = createImportSource(new FileInputStream(new File(this.modelPath)));
+				
+				pmml = JAXBUtil.unmarshalPMML(source);
 	    		System.err.println("Read model from local disk!");
 			}
 
@@ -157,9 +175,20 @@ public class ScorePMML extends EvalFunc<Tuple> {
 
 		this.evaluator 		 = (Evaluator)modelManager;			// Model Evaluator
 		this.activeFields 	 = evaluator.getActiveFields();		// input columns
-		this.predictedFields = evaluator.getPredictedFields();	// predicted columns
+		this.predictedFields = evaluator.getTargetFields();	// predicted columns
 		this.outputFields 	 = evaluator.getOutputFields();		// derived output columns (based on predicted columns)
 
+	}
+	
+	public Source createImportSource(InputStream stream) throws SAXException, FileNotFoundException {
+		
+		InputSource is = new InputSource(stream);
+		
+		XMLReader reader = XMLReaderFactory.createXMLReader();
+
+		ImportFilter filter = new ImportFilter(reader);
+
+		return new SAXSource(filter, is);
 	}
 	
 	// Define Output Schema
@@ -280,7 +309,14 @@ public class ScorePMML extends EvalFunc<Tuple> {
 		for(FieldName inputField : this.activeFields){
 
 			// Get Object
-			Object origBodyCell = (Object) input.get(aliasMap.get(inputField.getValue().toLowerCase()));
+			Object origBodyCell = null;
+			try {
+				origBodyCell = (Object) input.get(aliasMap.get(inputField.getValue().toLowerCase()));
+			} catch (NullPointerException e) {
+				// Handle missing data with fillna(0)
+				origBodyCell = Long.valueOf(0l);
+				System.err.println("WARNING: Missing data in dataset. Field : " + inputField.getValue().toLowerCase());
+			}
 			
 			Object bodyCell;
 			if (origBodyCell instanceof Long) {
