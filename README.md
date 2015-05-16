@@ -1,7 +1,5 @@
 # Fork from Surus
-Thanks to Netflix for this UDF
-This fork intends to update jpmml evaluator to 1.1.18
-Tested on real cluster
+Thanks to Netflix for this UDF. This fork intends to update jpmml evaluator to 1.1.18. Tested on real cluster
 
 # Surus
 
